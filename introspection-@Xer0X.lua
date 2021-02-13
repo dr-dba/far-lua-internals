@@ -1,12 +1,12 @@
-﻿--[[		(c) Xer0X
+--[[		(c) Xer0X
 	"Православие или Смерть!" group
 
-	Tools for "introspection", 
+	Tools for "introspection",
 	aka live code analysis.
 ]]
 
-if not	Xer0X 
-then	Xer0X = { } 
+if not	Xer0X
+then	Xer0X = { }
 end
 
 Xer0X.fnc_definition_parse = function(line)
@@ -234,7 +234,7 @@ Xer0X.fnc_mcr_src_tbl_clean = function(mcr_src, tbl_mcr)
 		then
 			ii_skip = 0
 			if
-				ii_mcr.FileName 
+				ii_mcr.FileName
 			and	mcr_src == string.lower(ii_mcr.FileName)
 			then	mcr_rem = mcr_rem + 1
 				if	tbl_rebind_guids
@@ -393,11 +393,29 @@ Xer0X.fnc_file_whoami = function(inp_args, from_level, details)
 			own_file_fold, own_file_name, own_file_extn = string.match(own_file_path, "(.-)([^/\\]+)([.][^.]+)$")
 		end
 	end
-	local as_module = inp_args and (
-		inp_args[1] == "load_as_module" or
-		inp_args[1] == own_file_name
-			)
+	local	own_mdl_head, own_mdl_tail, as_module
+	local	the_mdl_name = type(inp_args) == "table" and #inp_args > 0 and inp_args[1] or inp_args
+	if	the_mdl_name
+	and	type(the_mdl_name) == "string"
+	then	own_mdl_head = the_mdl_name:match("^(.*)%.")
+		own_mdl_tail = the_mdl_name:match("[.](.*)$")
+		as_module = (
+			the_mdl_name == "load_as_module" or
+			the_mdl_name == own_file_name or
+			own_mdl_head and
+			the_mdl_name:match("%.("..own_file_name..")$") == own_file_name and
+			own_file_fold:match("\\("..own_mdl_head..")\\$")==own_mdl_head
+				)
+	end
 	return as_module, inp_args, own_file_path, own_file_fold, own_file_name, own_file_extn, dbg_info.short_src, dbg_info.name, dbg_info.currentline, dbg_info
+end
+
+Xer0X.fnc_mcr_src_reload = function(mcr_src, mcr_src_inf_mod, force)
+	local dt_inf_new = win.GetFileInfo(mcr_src)
+	if not force and dt_inf_new.LastWriteTime == mcr_src_inf_mod then return end
+	Xer0X.fnc_load_macro_one(nil, mcr_src)
+	Xer0X.fnc_trans_msg("\n"..Xer0X.fnc_norm_script_path(mcr_src).."\n", "Macro reloaded, please rerun the action", "w", "pers")
+	return true
 end
 
 return {
