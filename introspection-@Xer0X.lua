@@ -5,9 +5,8 @@
 	aka live code analysis.
 ]]
 
-if not	Xer0X
-then	Xer0X = { }
-end
+if not Xer0X then Xer0X = { } end
+require("Lib-Common-@Xer0X")
 
 Xer0X.fnc_definition_parse = function(line)
 	assert(type(line) == "string")
@@ -23,6 +22,11 @@ Xer0X.fnc_definition_parse = function(line)
 	return "(anonymous)"
 end
 
+--[[ Private:
+Tries to guess a function's name when the debug info structure does not have it.
+It parses either the file or the string where the function is defined.
+Returns '?' if the line where the function is defined is not found
+--]]
 Xer0X.fnc_func_name_guess = function(dbg_info)
 	local	line_str, line_def, line_cur, src_code
 	local	src_code = ""
@@ -65,7 +69,7 @@ Xer0X.fnc_func_name_guess = function(dbg_info)
 	end
 	if src_code == "" then src_code = nil end
 	return line_def and Xer0X.fnc_definition_parse(line_def) or "?", src_code, line_cur
-end
+end -- fnc_func_name_guess
 
 Xer0X.fnc_source_info_get = function(src_thr, src_lev, show_info, mode_locals, mode_upvals, with_nums, tbl_locals, tbl_upvals, tbl_meta, tbl_lcvrid)
 	if	type(src_thr) ~= "thread" and
@@ -125,7 +129,7 @@ Xer0X.fnc_source_info_get = function(src_thr, src_lev, show_info, mode_locals, m
 	end
 	if mcr_src then mcr_src = far.ConvertPath(mcr_src, 1) end
 	return mcr_src, mcr_inf, mcr_inf and mcr_inf.LastWriteTime, tbl_locals, tbl_upvals, dbg_info
-end
+end -- fnc_source_info_get
 
 
 local all_the_stuff = {}
@@ -142,9 +146,9 @@ for ii = 0, 1000 do
 	end
 end
 _G.Xer0X.internals = all_the_stuff
+local tbl_macrolist_marks = { }
+local tbl_mcr_items_marks = { }
 
-local tbl_macrolist_marks = {}
-local tbl_mcr_items_marks = {}
 Xer0X.fnc_find_macrolist = function(mark_id)
 	mark_id = mark_id and ":"..mark_id or ":?"
 	local ii_from, all_the_stuff
@@ -179,7 +183,7 @@ Xer0X.fnc_find_macrolist = function(mark_id)
 		end
 	end
 	ii_from = found and (tbl_mcr_lst_loc_idx or tbl_mcr_lst_upv_idx) or 1
-	all_the_stuff = {}
+	all_the_stuff = { }
 	for ii = ii_from, 1000 do
 		local mcr_src, mcr_inf, LastWriteTime, tbl_locals, tbl_upvals, dbg_inf
 			= Xer0X.fnc_source_info_get(nil, ii, nil, 2, 2, false)
