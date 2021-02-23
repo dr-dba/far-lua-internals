@@ -299,25 +299,6 @@ Xer0X.fnc_mcr_src_agg_clean = function(mcr_src, tbl_agg)
 	end
 end
 
-Xer0X.fnc_mcr_src_fnc_clean__v0 = function(mcr_src, tbl_fnc)
-	mcr_src = string.lower(mcr_src)
-	local fnc_scr_path, cc_to_del
-	local rem_cnt = 0
-	for	ii_cc = 1, #tbl_fnc
-	do      for	ii_ccf, ccf in pairs(tbl_fnc[ii_cc - rem_cnt])
-		do	if type(ccf) == "function" then
-				fnc_scr_path = string.match(debug.getinfo(ccf, "S").source, "^@(.+)")
-				if mcr_src == string.lower(fnc_scr_path)
-				then	tbl_fnc[ii_cc - rem_cnt][ii_ccf] = nil
-				end
-			end
-		end
-		if	next(tbl_fnc[ii_cc - rem_cnt]) == nil
-		then	table.remove(tbl_fnc, ii_cc - rem_cnt)
-			rem_cnt = rem_cnt + 1
-		end
-	end
-end
 
 Xer0X.fnc_mcr_src_fnc_clean = function(mcr_src, tbl_fnc)
 	mcr_src = string.lower(mcr_src)
