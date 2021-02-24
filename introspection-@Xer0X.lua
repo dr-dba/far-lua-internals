@@ -1,416 +1,666 @@
---[[		(c) Xer0X
-	"Православие или Смерть!" group
-
-	Tools for "introspection",
-	aka live code analysis.
+--[[!
+https://gist.github.com/johnd0e/5110ddfb3291928a7f484cd38f23ff87
+https://forum.farmanager.com/viewtopic.php?t=7988
+https://forum.farmanager.com/viewtopic.php?t=7521
 ]]
 
+local Info = Info or package.loaded.regscript or function(...) return ... end -- luacheck: ignore 113/Info
+local nfo = Info { _filename or ...,
+	name		= "Lua Explorer Advanced";
+	description	= "Explore Lua environment in your Far manager (+@Xer0X mod.)";
+	id		= "C61B1E8D-71D4-445C-85A6-35EA1D5B6EF3";
+	version		= "2.4";
+	version_mod	= "1.4.5";
+	author		= "jd";
+	author_mod	= "Xer0X";
+	url		= "http://forum.farmanager.com/viewtopic.php?f=60&t=7988";
+	url_mod		= "https://github.com/dr-dba/far-lua-explorer";
+	licence		= [[
+based on Lua Explorer by EGez:
+http://forum.farmanager.com/viewtopic.php?f=15&t=7521
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.
+ANY USE IS AT YOUR OWN RISK.]];
+	help = function(nfo) far.Message(nfo.helpstr, ('%s v%s'):format(nfo.name,nfo.version), nil, "l") end;
+	options     = {
+		tables_first = true,
+		ignore_case = true,
+		chars = {
+			['table'] = '≡',    -- ⁞≡•·÷»›►
+			['function'] = '˜', -- ᶠ¨˝˜
+		},
+		bin_string = '#string',
+	};
+}
+if not nfo or nfo.disabled then return end
+local O = nfo.options
+assert(far, 'This is LuaExplorer for Far manager')
+local uuid	= win.Uuid('7646f761-8954-42ca-9cfc-e3f98a1c54d3')
+nfo.helpstr	= [[
+
+There are some keys available:
+
+F1              Show this help
+F4              Edit selected object
+Del             Delete selected object
+Ins             Add an object to current table
+Ctrl+M          Show metatable
+Ctrl+F          Show/hide functions
+Ctrl+T          Toggle sort by type
+Ctrl+I          Toggle ignore case
+
+for functions:
+
+Enter           Call function (params prompted)
+F3              Show some function info
+Shift+F3        Show some function info (LuaJIT required)
+Alt+F4          Open function definition (if available) in editor
+Ctrl+Up         Show upvalues (editable)
+Ctrl+Down       Show environment (editable)
+
+
+Copy to clipboard:
+
+Ctrl+Ins        value
+Ctrl+Shift+Ins  key
+]]
 if not Xer0X then Xer0X = { } end
-require("Lib-Common-@Xer0X")
+local omit = {}
+local brkeys = {}
 
-Xer0X.fnc_definition_parse = function(line)
-	assert(type(line) == "string")
-	local match
-	match = line:match("^%s*function%s+(%w+)")
-	if match then return match end
-	match = line:match("^%s*local%s+function%s+(%w+)")
-	if match then return match end
-	match = line:match("^%s*local%s+(%w+)%s+=%s+function")
-	if match then return match end
-	match = line:match("%s*function%s*%(")
-	if match then return "(anonymous)" end
-	return "(anonymous)"
-end
-
---[[ Private:
-Tries to guess a function's name when the debug info structure does not have it.
-It parses either the file or the string where the function is defined.
-Returns '?' if the line where the function is defined is not found
---]]
-Xer0X.fnc_func_name_guess = function(dbg_info)
-	local	line_str, line_def, line_cur, src_code
-	local	src_code = ""
-	if	type(dbg_info.source) == "string" and dbg_info.source:sub(1, 1) == "@"
+-- format values for menu items and message boxes
+local function fnc_val_fmt(val, mode)
+	local	val_type = type(val)
+	local	val_res
+	if
+		val_type == 'string'
 	then
-		local	fileH, err = io.open(dbg_info.source:sub(2), "r")
-		if not	fileH
-		then	return "?"
+		val_res = val
+		if not	val_res:utf8valid()
+		then
+			local utf_8, err = win.Utf16ToUtf8(win.MultiByteToWideChar(val, win.GetACP()));
+			val_res = utf_8 or err
+			val_type = O.bin_string
 		end
-		for	line_num = 1, dbg_info.lastlinedefined
-		do 	line_str = fileH:read("*l")
-			if not	line_str then break end
-			if	line_num == dbg_info.linedefined
-			then	line_def = line_str
-			end
-			if	line_num == dbg_info.currentline
-			then	line_cur = line_str
-			end
-			if	line_num >= dbg_info.linedefined and
-				line_num <= dbg_info.lastlinedefined
-			then	src_code = src_code..line_str..string.char(10)..string.char(13)
-			end
+		if	val_res:match('%z')
+		or	mode == 'edit'
+		then    val_res = ('%q'):format(val_res)
+		elseif	mode ~= 'view' and (
+				mode ~= 'list' or
+				val_res == '' or
+				val_res:sub(-1, -1) == " "
+					)
+		then	val_res = '"'..val_res..'"'
 		end
-		fileH:close()
+	elseif
+		val_type == "number"
+	then
+		val_res = (mode == "edit" and "0x%x --[[ %s ]]" or "0x%08x (%s)"):format(val, val)
 	else
-		local	line_num = 0
-		for	line_str in string.gmatch(dbg_info.source, "([^\n]+)\n-")
-		do	line_num = line_num + 1
-			if	line_num == dbg_info.linedefined
-			then	line_def = line_str
-			end
-			if	line_num == dbg_info.currentline
-			then	line_cur = line_str
-			end
-			if	line_num >= dbg_info.linedefined and
-				line_num <= dbg_info.lastlinedefined
-			then	src_code = src_code..line_str..string.char(10)..string.char(13)
-			end
-		end
+		val_res = tostring(val)
 	end
-	if src_code == "" then src_code = nil end
-	return line_def and Xer0X.fnc_definition_parse(line_def) or "?", src_code, line_cur
-end -- fnc_func_name_guess
-
-Xer0X.fnc_source_info_get = function(src_thr, src_lev, show_info, mode_locals, mode_upvals, with_nums, tbl_locals, tbl_upvals, tbl_meta, tbl_lcvrid)
-	if	type(src_thr) ~= "thread" and
-		type(src_thr) ~= "nil"
-	then	src_thr, src_lev, show_info, mode_locals, mode_upvals, tbl_locals, tbl_upvals, tbl_meta, tbl_lcvrid = nil,
-		src_thr, src_lev, show_info, mode_locals, mode_upvals, tbl_locals, tbl_upvals, tbl_meta, tbl_lcvrid
-	end
-	local dbg_info, LoadedMacros, mcr_src, mcr_inf
-	if not tbl_upvals then tbl_upvals = {} end
-	if not tbl_locals then tbl_locals = {} end
-	if not tbl_locals._VAR_MAP then tbl_locals._VAR_MAP = { i2n = { }, n2i = { }, raw = { } } end
-	local dbg_props = nil
-	local is_same_thr = not src_thr or coroutine.running() == src_thr
-	if	is_same_thr
-	then	dbg_info = debug.getinfo(src_lev, dbg_props)
-	else	dbg_info = debug.getinfo(src_thr, src_lev, dbg_props)
-	end
-	if	dbg_info
-	then	local fnc_name, fnc_code, curr_line = Xer0X.fnc_func_name_guess(dbg_info)
-		if not	dbg_info.name
-		then	dbg_info.name = fnc_name
-                end
-		dbg_info.currentline_txt = curr_line
-		dbg_info.source_code = fnc_code
-		mcr_src = dbg_info.source:sub(2)
-		mcr_inf = win.GetFileInfo(mcr_src)
-		if	mode_upvals and mode_upvals > 0
-		then	for	ii = 1, dbg_info.nups
-			do	local n, v = debug.getupvalue(dbg_info.func, ii)
-				if band(mode_upvals, 2) == 2
-				then tbl_upvals[with_nums and "["..ii.."] "..n or n] = v or "<NIL>"
-				end
-			end
-		end
-		if	mode_locals and mode_locals > 0
-		then	local	ii = 0
-			while	true
-			do	ii = ii + 1
-				local n, v
-				if	is_same_thr
-				then	n, v = debug.getlocal(src_lev, ii)
-				else	n, v = debug.getlocal(src_thr, src_lev, ii)
-				end
-				v = type(v) == "nil" and "<NIL>" or v
-			        if not n then break end
-				if band(mode_locals, 2) == 2
-				then tbl_locals[with_nums and "["..ii.."] "..n or n] = v
-				end
-				tbl_locals._VAR_MAP.raw[n] = v
-				tbl_locals._VAR_MAP.n2i[n] = ii
-				tbl_locals._VAR_MAP.i2n[ii]= n
-			end
-		end
-	elseif	type(src_lev) == "string"
-	then	mcr_inf = win.GetFileInfo(src_lev)
-		if mcr_inf then mcr_src = src_lev end
-	end
-	if mcr_src then mcr_src = far.ConvertPath(mcr_src, 1) end
-	return mcr_src, mcr_inf, mcr_inf and mcr_inf.LastWriteTime, tbl_locals, tbl_upvals, dbg_info
-end -- fnc_source_info_get
-
-
-local all_the_stuff = {}
-for ii = 0, 1000 do
-	local mcr_src, mcr_inf, LastWriteTime, tbl_locals, tbl_upvals, dbg_info = Xer0X.fnc_source_info_get(nil, ii, nil, 2, 2, false)
-	if not dbg_info then break end
-	all_the_stuff[ii + 1] = { mcr_src = mcr_src, mcr_inf = mcr_inf, LastWriteTime = LastWriteTime, tbl_locals = tbl_locals, tbl_upvals = tbl_upvals, dbg_info = dbg_info }
-	if	tbl_upvals.LoadedMacros
-	then    Xer0X.utils = tbl_upvals
-		Xer0X.utils_local = tbl_locals
-	elseif	tbl_upvals.KeyMacro
-	then	Xer0X.key_mcr_inf = tbl_upvals
-		Xer0X.key_mcr_inf_loc = tbl_locals
-	end
-end
-_G.Xer0X.internals = all_the_stuff
-local tbl_macrolist_marks = { }
-local tbl_mcr_items_marks = { }
-
-Xer0X.fnc_find_macrolist = function(mark_id)
-	mark_id = mark_id and ":"..mark_id or ":?"
-	local ii_from, all_the_stuff
-	local	tbl_mcr_lst_upv,
-		tbl_mcr_lst_loc,
-		tbl_mcr_items_U,
-		tbl_mcr_items_L
-	local tbl_mcr_lst_upv_idx = tbl_macrolist_marks["UPV"..mark_id]
-	local tbl_mcr_lst_loc_idx = tbl_macrolist_marks["LOC"..mark_id]
-	local tbl_mcr_items_L_idx = tbl_mcr_items_marks["LOC"..mark_id]
-	local found =
-		tbl_mcr_lst_upv_idx or
-		tbl_mcr_lst_loc_idx
-	local	var_key, var_val, dbg_inf
-	if	tbl_mcr_lst_loc_idx
-	then	dbg_inf = debug.getinfo(tbl_mcr_lst_loc_idx - 1)
-		if	dbg_inf
-		then	var_key, var_val = debug.getlocal(tbl_mcr_lst_loc_idx - 1, Xer0X.env_mcr_lst_loc._VAR_MAP.n2i.macrolist)
-		end
-		if	var_key == "macrolist"
-		then	tbl_mcr_lst_loc = var_val
-			found = true
-		else	found = false
-		end
-		if	found
-		then	var_key, var_val = debug.getlocal(tbl_mcr_items_L_idx - 1, Xer0X.env_mcr_items_L._VAR_MAP.n2i.menuitems)
-			if	var_key == "menuitems"
-			then	tbl_mcr_items_L = var_val
-				goto end_of_proc
-			else	found = false
-			end
-		end
-	end
-	ii_from = found and (tbl_mcr_lst_loc_idx or tbl_mcr_lst_upv_idx) or 1
-	all_the_stuff = { }
-	for ii = ii_from, 1000 do
-		local mcr_src, mcr_inf, LastWriteTime, tbl_locals, tbl_upvals, dbg_inf
-			= Xer0X.fnc_source_info_get(nil, ii, nil, 2, 2, false)
-		if not dbg_inf then break end
-		all_the_stuff[ii] = { mcr_src = mcr_src, mcr_inf = mcr_inf, LastWriteTime = LastWriteTime, tbl_locals = tbl_locals, tbl_upvals = tbl_upvals, dbg_inf = dbg_inf }
-		if	tbl_upvals.macrolist
-		then
-			Xer0X.env_mcr_lst_upv = tbl_upvals
-			Xer0X.env_mcr_lst_upv.LEVEL = ii
-			Xer0X.env_mcr_lst_upv_loc = tbl_locals
-			Xer0X.env_mcr_lst_upv_idx = ii
-			tbl_mcr_lst_upv = tbl_upvals.macrolist
-			tbl_macrolist_marks["UPV"..mark_id] = ii
-			found = true
-		end
-		if	tbl_locals.macrolist
-		then
-			Xer0X.env_mcr_lst_loc = tbl_locals
-			Xer0X.env_mcr_lst_loc_upv = tbl_upvalues
-			Xer0X.env_mcr_lst_loc.LEVEL = ii
-			Xer0X.env_mcr_lst_loc_idx = ii
-			tbl_mcr_lst_loc = tbl_locals.macrolist
-			tbl_macrolist_marks["LOC"..mark_id] = ii
-			found = true
-		end
-		if	tbl_locals.menuitems
-		then
-			Xer0X.env_mcr_items_L = tbl_locals
-			Xer0X.env_mcr_items_L_upv = tbl_upvalues
-			Xer0X.env_mcr_items_L.LEVEL = ii
-			Xer0X.env_mcr_items_L_idx = ii
-			tbl_mcr_items_L = tbl_locals.menuitems
-			tbl_mcr_items_marks["LOC"..mark_id] = ii
-		end
-	end
-	if	found
-	then	Xer0X.env_mcr_lst_full_stack = all_the_stuff
-	end
-	::end_of_proc::
-	return found, tbl_mcr_lst_upv, tbl_mcr_lst_loc, tbl_mcr_items_L
+	return val_res, val_type
 end
 
-Xer0X.fnc_mcr_src_tbl_clean = function(mcr_src, tbl_mcr)
-	mcr_src = string.lower(mcr_src)
-	local tbl_rebind_guids = Xer0X.ReBind and Xer0X.ReBind.GUIDs
-	local mcr_cnt = #tbl_mcr
-	local mcr_rem = 0
-	local ii_mcr, ii_skip, ii_guid
-	for	ii = 1, mcr_cnt
-	do	ii_mcr = tbl_mcr[ii]
-		if  ii_mcr and type(ii_mcr) == "table"
-		then
-			ii_skip = 0
-			if
-				ii_mcr.FileName
-			and	mcr_src == string.lower(ii_mcr.FileName)
-			then	mcr_rem = mcr_rem + 1
-				if	tbl_rebind_guids
-				then	tbl_rebind_guids[ii_mcr.id or ii_mcr.guid] = nil
-				end
-				ii_skip = 1
-			end
-			if	mcr_rem > 0
-			then	tbl_mcr[ii - mcr_rem + ii_skip] = tbl_mcr[ii]
-				tbl_mcr[ii] = nil
-			end
-		end
-	end
-	for	ii, ii_mcr in pairs(tbl_mcr)
-	do	if	type(ii_mcr) == "table"
-		and	mcr_src == string.lower(ii_mcr.FileName or "<NO-FILE-SOURCE-FOR-THIS-MACRO>")
-		then	if	tbl_rebind_guids
-			then	ii_guid = tbl_mcr[ii].id or tbl_mcr[ii].guid
-				if	ii_guid
-				and	tbl_rebind_guids[ii_guid]
-				then	tbl_rebind_guids[ii_guid] = nil
-				end
-			end
-			tbl_mcr[ii] = nil
-		end
-	end
+-- make menu item for far.Menu(...)
+local KEY_WIDTH = 30
+local ITEM_FMT = ('%%-%s.%ss'):format(KEY_WIDTH, KEY_WIDTH)..'%s%-8s │%-25s'
+
+local function fnc_make_menu_items(val_key, sval, val_type)
+	local key_fmt = fnc_val_fmt(val_key, 'list')
+	local border = key_fmt:len() <= KEY_WIDTH and '│' or '…'
+	return {
+		text	= ITEM_FMT:format(key_fmt, border, val_type, sval),
+		key	= val_key,
+		type	= val_type,
+		checked	= O.chars[val_type]
+	}
 end
 
-Xer0X.fnc_mcr_src_agg_clean = function(mcr_src, tbl_agg)
-	mcr_src = string.lower(mcr_src)
-	for	ii_one, tbl_one in pairs(tbl_agg)
-	do	for	ii_mcr, tbl_mcr in pairs(tbl_one)
-		do      if tbl_mcr.FileName
-			then	Xer0X.fnc_mcr_src_tbl_clean(mcr_src, tbl_one)
-				break
-			else 	Xer0X.fnc_mcr_src_tbl_clean(mcr_src, tbl_mcr)
-			end
-		end
-		for	ii_mcr = 1, #tbl_one
-		do      if not tbl_one[ii_mcr].FileName then
-				Xer0X.fnc_mcr_src_tbl_clean(mcr_src, tbl_one[ii_mcr])
-			end
-		end
-	end
-	for	ii_agg = 1, #tbl_agg
-	do	for	ii_mcr, tbl_mcr in pairs(tbl_agg[ii_agg])
-		do      if tbl_mcr.FileName
-			then	Xer0X.fnc_mcr_src_tbl_clean(mcr_src, tbl_agg[ii_agg])
-				break
-			else	Xer0X.fnc_mcr_src_tbl_clean(mcr_src, tbl_mcr)
-			end
-		end
-		for	ii_mcr = 1, #tbl_agg[ii_agg]
-		do      if not tbl_agg[ii_agg][ii_mcr].FileName then
-				Xer0X.fnc_mcr_src_tbl_clean(mcr_src, tbl_agg[ii_agg][ii_mcr])
-			end
-		end
-	end
-end
-
-
-Xer0X.fnc_mcr_src_fnc_clean = function(mcr_src, tbl_fnc)
-	mcr_src = string.lower(mcr_src)
-	local fnc_scr_path
-	local rem_cnt = 0
-	for	ii_cc = 1, #tbl_fnc - rem_cnt
-	do      for	ii_ccf, ccf in pairs(tbl_fnc[ii_cc - rem_cnt])
-		do	if type(ccf) == "function" then
-				fnc_scr_path = string.match(debug.getinfo(ccf, "S").source, "^@(.+)")
-				if mcr_src == string.lower(fnc_scr_path)
-				then	table.remove(tbl_fnc, ii_cc - rem_cnt)
-					rem_cnt = rem_cnt + 1
-					break
-				end
-			end
-		end
-	end
-end
-
-Xer0X.fnc_mcr_src_all_clean = function(mcr_src, tbl_what)
-	if not tbl_what or tbl_what.macro then Xer0X.fnc_mcr_src_tbl_clean(mcr_src, Xer0X.utils.LoadedMacros)	end
-	if not tbl_what or tbl_what.pnlmd then Xer0X.fnc_mcr_src_tbl_clean(mcr_src, Xer0X.utils.LoadedPanelModules)end
-	if not tbl_what or tbl_what.cmdln then Xer0X.fnc_mcr_src_tbl_clean(mcr_src, Xer0X.utils.AddedPrefixes)	end
-	if not tbl_what or tbl_what.mnitm then Xer0X.fnc_mcr_src_tbl_clean(mcr_src, Xer0X.utils.AddedMenuItems)	end
-	if not tbl_what or tbl_what.macro then Xer0X.fnc_mcr_src_agg_clean(mcr_src, Xer0X.utils.Areas)          end
-	if not tbl_what or tbl_what.event then Xer0X.fnc_mcr_src_agg_clean(mcr_src, Xer0X.utils.Events)		end
-	if not tbl_what or tbl_what.cncol then Xer0X.fnc_mcr_src_fnc_clean(mcr_src, Xer0X.utils.ContentColumns) end
-end
-
-Xer0X.fnc_macro_one_load = function(mcr_info, mcr_path)
-	mcr_path = far.ConvertPath(mcr_path, 1)
-	Xer0X.fnc_mcr_src_all_clean(mcr_path)
-	collectgarbage("collect")
-	local	fnc, msg = loadfile(mcr_path)
-	if not	fnc
-	then	far.Message(msg, "Error loading macro file", nil, "w") return
-	end
-	local tbl_env_mcr_ini = {
-		Macro		= function(srctable) Xer0X.utils.AddRegularMacro(	srctable, mcr_path) end,
-		Event		= function(srctable) Xer0X.utils.AddEvent(		srctable, mcr_path) end,
-		MenuItem	= function(srctable) Xer0X.utils.AddMenuItem(		srctable, mcr_path) end,
-	        CommandLine	= function(srctable) Xer0X.utils.AddPrefixes(		srctable, mcr_path) end,
-		PanelModule	= function(srctable) Xer0X.utils.AddPanelModule(	srctable, mcr_path) end,
-		ContentColumns	= function(srctable) Xer0X.utils.AddContentColumns(	srctable, mcr_path) end,
-		LoadRegularFile	= Xer0X.utils_local.LoadRegularFile
-			}
-	local fnc_dummy = function() end
-	local tbl_no_fnc_list = { "NoMacro", "NoEvent", "NoMenuItem", "NoCommandLine", "NoPanelModule", "NoContentColumns" }
-	local mt_g = { __index = _G }
-	for _, fnc_name in ipairs(tbl_no_fnc_list) do tbl_env_mcr_ini[fnc_name] = fnc_dummy; end
-	setmetatable(tbl_env_mcr_ini, mt_g)
-	setfenv(fnc, tbl_env_mcr_ini)
-	local	ret, msg = pcall(fnc, mcr_path)
-	if not	ret
-	then	far.Message(msg, "Error loading macro func (introspection-@Xer0X)", nil, "w")
-	end
-end
-
-Xer0X.fnc_macro_dir_load = function(src_dir)
-	far.RecursiveSearch(
-		src_dir ,
-		"*.lua",
-		Xer0X.fnc_macro_one_load,
-		0
+local function fnc_is_LE_obj(obj)
+	return 2 < ( 0
+		+ ("nil" ~= type(obj.obj)	and 1 or 0)
+		+ ("nil" ~= type(obj.menu_idx ) and 1 or 0)
+		+ ("nil" ~= type(obj.menu_item) and 1 or 0)
+		+ ("nil" ~= type(obj.menu_item) and 1 or 0)
+		+ ("nil" ~= type(obj.child_menu_item_txt) and 1 or 0)
+		+ ("nil" ~= type(obj.child_menu_item_idx) and 1 or 0)
 			)
 end
 
--- @@@@@ End of the trick with ad-hoc loading macros  @@@@@ ?
-
-Xer0X.fnc_file_whoami = function(inp_args, from_level, details)
-	local	dbg_info = debug.getinfo(from_level or 2, details or "S")
-	local	own_file_path, own_file_fold, own_file_name, own_file_extn
-	if 	dbg_info.source
-	then	if	string.match(dbg_info.short_src, "^%[.*%]$")
-		then	own_file_path = dbg_info.short_src
-		else	own_file_path = dbg_info.source:match("^@(.+)")
-			own_file_fold, own_file_name, own_file_extn = string.match(own_file_path, "(.-)([^/\\]+)([.][^.]+)$")
+-- create sorted menu items with associated keys
+local function makeMenuItems(obj, obj_nav)
+	local items = { }
+	local item_props = { }
+	-- grab all 'real' keys
+	for key in pairs(obj)
+	do	local sval, vt = fnc_val_fmt(obj[key], 'list')
+		if not	omit[vt]
+		then	table.insert(items, fnc_make_menu_items(key, sval, vt))
+		end
+		item_props[key] = obj[key]
+	end
+	--[[ Far uses some properties that in fact are functions in obj.properties
+	but they logically belong to the object itself. It's all Lua magic ;) ]]
+--!	if getmetatable(obj) == "access denied" then ...
+	local success, props = pcall(function() return obj.properties end)
+--!	if not success then far.Message(props,'Error in __index metamethod', nil, 'wl') end
+	if	type(props) == 'table'
+	and not rawget(obj, 'properties')
+	then
+		item_props.__HIDDEN_PROPS_HACK__ = true
+	--!	if type(obj.properties) == 'table' and not rawget(obj, 'properties') then
+		-- todo use list of APanel Area BM CmdLine Dlg Drv Editor Far Help Menu Mouse Object PPanel Panel Plugin Viewer
+		for key in pairs(obj.properties)
+		do	local sval, vt = fnc_val_fmt(obj[key], 'list')
+			if not	omit[vt]
+			then	table.insert(items, fnc_make_menu_items(key, sval, vt))
+			end
+			item_props[key] = obj[key]
 		end
 	end
-	local	own_mdl_head, own_mdl_tail, as_module
-	local	the_mdl_name = type(inp_args) == "table" and #inp_args > 0 and inp_args[1] or inp_args
-	if	the_mdl_name
-	and	type(the_mdl_name) == "string"
-	then	own_mdl_head = the_mdl_name:match("^(.*)%.")
-		own_mdl_tail = the_mdl_name:match("[.](.*)$")
-		as_module = (
-			the_mdl_name == "load_as_module" or
-			the_mdl_name == own_file_name or
-			own_mdl_head and
-			the_mdl_name:match("%.("..own_file_name..")$") == own_file_name and
-			own_file_fold:match("\\("..own_mdl_head..")\\$")==own_mdl_head
-				)
+	--[[!
+	table.sort(items, function(v1, v2)
+		return v1.text < v2.text
+	end) --]]
+	--[[!
+	table.sort(items, function(v1, v2)
+		if O.tables_first and (v1.type == 'table') ~= (v2.type == 'table')
+		then	return v1.type == 'table'
+		else    return v1.text < v2.text
+		end
+	end) ]]
+-- [[
+	table.sort(items, function(v1, v2)
+		if
+			O.tables_first and v1.type ~= v2.type
+		then
+			return
+				v1.type == 'table' or
+				v2.type ~= 'table' and v1.type < v2.type
+		else
+			if	O.ignore_case
+			then	return v1.text:lower() < v2.text:lower()
+			else    return v1.text < v2.text
+			end
+		end
+	end) --]]
+	local	obj_nav_idx
+	if	obj_nav
+	then	local obj_nav_val = fnc_is_LE_obj(obj_nav) and obj_nav.obj_val or obj_nav
+		for key, val in pairs(items)
+		do	if	val.key == obj_nav_val
+			then	obj_nav_idx = key
+				break
+			end
+		end
 	end
-	return as_module, inp_args, own_file_path, own_file_fold, own_file_name, own_file_extn, dbg_info.short_src, dbg_info.name, dbg_info.currentline, dbg_info
+	return items, item_props, obj_nav_idx
 end
 
-Xer0X.fnc_mcr_src_reload = function(mcr_src, mcr_src_inf_mod, force)
-	local dt_inf_new = win.GetFileInfo(mcr_src)
-	if not force and dt_inf_new.LastWriteTime == mcr_src_inf_mod then return end
-	Xer0X.fnc_load_macro_one(nil, mcr_src)
-	Xer0X.fnc_trans_msg("\n"..Xer0X.fnc_norm_script_path(mcr_src).."\n", "Macro reloaded, please rerun the action", "w", "pers")
-	return true
+local function getres(stat, ...) return stat, stat and { ... } or (...) and tostring(...) or '', select('#', ...) end
+
+local function checknil(t, n) for ii = 1, n do if t[ii] == nil then return true end end end
+
+-- custom concat (applies 'tostring' to each item)
+local function concat(tbl_inp, delim, pos1, pos2)
+--!	assert(delim and pos1 and pos2)
+	local str = pos2 > 0 and tostring(tbl_inp[pos1]) or ''
+	for ii = pos1 + 1, pos2 do str = str..delim..tostring(tbl_inp[ii]) end
+	return str
 end
 
-return {
-	fnc_mcr_src_agg_clean	= fnc_mcr_src_agg_clean,
-	fnc_mcr_src_all_clean	= fnc_mcr_src_all_clean,
-	fnc_mcr_src_fnc_clean	= fnc_mcr_src_fnc_clean,
-	fnc_mcr_src_tbl_clean	= fnc_mcr_src_tbl_clean,
-	fnc_source_info_get	= fnc_source_info_get,
-	fnc_func_name_guess	= fnc_func_name_guess,
-	fnc_macro_dir_load	= fnc_macro_dir_load,
-	fnc_macro_one_load	= fnc_macro_one_load,
-	fnc_definition_parse	= fnc_definition_parse,
+local function luaexp_prompt(Title, Prompt, Src, nArgs)
+	repeat
+		local	expr = far.InputBox(nil, Title:gsub('&','&&',1), Prompt, Title, Src, nil, nil, far.Flags.FIB_ENABLEEMPTY)
+		if not	expr then break end
+		local	f, err = loadstring('return '..expr)
+		if	f
+		then	local	stat, res, n = getres(pcall(f))
+			if	stat
+			then
+				if not nArgs or (nArgs == n and not checknil(res, n))
+				then	return res, n, expr
+				else	err = ([[
+%d argument(s) required
+
+  Expression entered: %q
+  Evaluated as %d arg(s): %s]]):format(nArgs,expr,n,concat(res,',',1,n))
+				end
+			else
+				err = res
+			end
+		end
+		far.Message(err, 'Error', nil, 'wl')
+	until false
+end
+
+-- edit or remove object at obj[key]
+local function editValue(obj, key, title, del)
+	if	del
+	then
+		local message = ('%s is a %s, do you want to remove it?')
+			:format(fnc_val_fmt(key), type(obj[key]):upper())
+		if 1 == far.Message(message, 'REMOVE: '..title, ';YesNo', 'w')
+		then	obj[key] = nil
+		end
+	else
+		local v, t = fnc_val_fmt(obj[key], 'edit')
+		if t == 'table' or t == 'function' then	v = ''	end
+		local	prompt = ('%s is a %s, type new value as Lua code'):format(fnc_val_fmt(key), t:upper())
+		local	res = luaexp_prompt('EDIT: '..title, prompt, v, 1)
+		if	res
+		then	if	t == O.bin_string
+			then	res[1] = win.WideCharToMultiByte(win.Utf8ToUtf16(res[1]), win.GetACP())
+			end
+			obj[key] = res[1]
+		end
+	end
+end
+
+-- add new element to obj
+local function insertValue(obj, title)
+	local	res = luaexp_prompt('INSERT: '..title, 'type the key and value comma separated as Lua code', nil, 2)
+	if	res then obj[res[1]] = res[2] end
+end
+
+local function getfParamsNames(f)
+	-- check _VERSION > "Lua 5.1"
+	if not jit then	return '...' end
+	local info = debug.getinfo(f)
+	local params = {}
+	for ii = 1, info.nparams or 1000
+	do	params[ii] = debug.getlocal(f, ii) or ("<%i>"):format(ii) -- C?
+	end
+	if info.isvararg then params[#params + 1] = '...' end
+	local paramstr = #params > 0 and table.concat(params,', ') or '<none>'
+	return paramstr, params
+end
+
+if not	_G.Xer0X
+then	_G.Xer0X = { }
+end
+if not	_G.Xer0X.tbl_explorer_reopen_chain
+then	_G.Xer0X.tbl_explorer_reopen_chain = { }
+end
+local tbl_reopen_paths = Xer0X.tbl_explorer_reopen_chain
+
+-- show a menu whose items are associated with the members of given object
+local function process(obj, title, action, obj_root, tbl_open_path)
+	local tbl_ReOp_path, is_obj_root
+	if	obj_root
+	then	tbl_ReOp_path = tbl_reopen_paths[obj_root]
+	else	tbl_ReOp_path = tbl_reopen_paths[obj]
+		is_obj_root = true
+		obj_root = obj
+		if not	tbl_open_path
+		then	tbl_open_path = { }
+		end
+		if not	tbl_ReOp_path
+		then	tbl_ReOp_path = { }
+			tbl_reopen_paths[obj] = tbl_ReOp_path
+		elseif	#tbl_open_path > 0
+		then	for ii = 1, #tbl_open_path, -1
+			do	local obj_path_item = table.remove(tbl_ReOp_path, 1)
+				if type(obj_path_item) == nil then break end
+				if not	fnc_is_LE_obj(tbl_open_path[ii])
+				and	obj_path_item.menu_item.key == tbl_open_path[ii]
+				then	local obj_new = { }
+					for ii_obj_key, ii_obj_val in pairs(obj_path_item)
+					do obj_new[ii_obj_key] = ii_obj_val
+					end
+					tbl_open_path[ii] = obj_new
+				end
+			end
+			while #tbl_ReOp_path > 0 do tbl_ReOp_path[#tbl_ReOp_path] = nil end
+		else	while #tbl_ReOp_path > 0
+			do table.insert(tbl_open_path, table.remove(tbl_ReOp_path, 1))
+			end
+		end
+	end
+	local tbl_cur_obj = is_obj_root and tbl_ReOp_path or tbl_ReOp_path[#tbl_ReOp_path]
+	title = type(title) == "string" and title or ''
+	--! here you can insert your custom actions
+	if action and brkeys[action] then brkeys[action]({ obj }, 1, title); return end
+	local	mprops = {
+		Id = uuid,
+		Bottom = 'F1, F3, F4, Del, Ctrl+M',
+		Flags = {
+			FMENU_SHOWAMPERSAND = 1,
+			FMENU_WRAPMODE = 1
+		}
+	}
+	local	menu_item, menu_idx, obj_ret, obj_rem, obj_nav
+	local	obj_type = type(obj)
+	--[[ some member types, need specific behavior:
+	* tables are submenus
+	* functions can be called --]]
+	if	obj_type == 'function'
+	then
+		local args, n, expr = luaexp_prompt(
+			'CALL:'..title,
+			('arguments: %s (type as Lua code or leave empty)')
+				:format(getfParamsNames(obj))
+					)
+		if not args then return end
+		-- overwrite the function object with its return values
+		local	stat, res = getres(pcall(obj, unpack(args, 1, n)))
+		if not	stat
+		then	far.Message(
+				('%s\n  CALL: %s (%s)\n  argument(s): %d'..(n > 0 and ', evaluated as: %s' or ''))
+					:format(res, title, expr, n, concat(args, ',', 1, n)),
+				'Error', nil, 'wl'
+			)
+			return
+		end
+		obj = res
+		title = ('%s(%s)'):format(title, expr)
+	-- other values are simply displayed in a message box
+	elseif	obj_type ~= 'table'
+	then	local value = fnc_val_fmt(obj, 'view')
+		far.Message(value, title:gsub('&', '&&', 1), nil, value:match('\n') and 'l' or '')
+		return
+	end
+	-- show this menu level again after each return from a submenu/function call ...
+	repeat
+		local menu_items, item_props, obj_nav_idx = makeMenuItems(obj, tbl_open_path and tbl_open_path[1])
+		mprops.Title = title..' ('..#menu_items..')'..(omit['function'] and '*' or '')
+		mprops.SelectIndex = obj_nav_idx or tbl_cur_obj.child_menu_item_idx
+		tbl_cur_obj.obj_props = item_props
+		if	tbl_open_path
+		and 	#tbl_open_path > 0
+		then	menu_item= tbl_open_path[1].menu_item or obj_nav_idx and menu_items[obj_nav_idx]
+			menu_idx = tbl_open_path[1].menu_idx  or obj_nav_idx
+			obj_nav = table.remove(tbl_open_path, 1)
+			if not	menu_item
+			then	--[[ the object changed!
+				it means that the old name dissapeared ]]
+				far.Message(string.format("The key [%s] was removed", obj_nav), title, nil, "wl")
+				obj_ret = "back"
+			end
+		else
+		--	mprops.SelectIndex = mprops.SelectIndex or tbl_cur_obj.child_menu_item_idx
+			menu_item, menu_idx = far.Menu(mprops, menu_items, brkeys)
+		end
+		if	menu_idx
+		then	mprops.SelectIndex = menu_idx
+			tbl_cur_obj.child_menu_item_idx = menu_idx
+			tbl_cur_obj.child_menu_item_txt = menu_item.text
+		end
+		-- show submenu/call function ...
+		if	menu_item
+		then
+			if	menu_item.name == "goBack"
+			then
+				obj_ret = "back"
+			else
+				local obj_key_child = menu_item.key or menu_idx > 0 and menu_items[menu_idx].key
+				local title_child = (title ~= '' and title..'.' or title)..tostring(obj_key_child)
+				if	menu_item.key ~= nil
+				then	local obj_child = obj[obj_key_child]
+					if type(obj_child) ~= "nil"
+					then	table.insert(tbl_ReOp_path, {
+							obj_val  = obj_child,
+							obj_key  = obj_key_child,
+							menu_idx = menu_idx,
+							menu_item= menu_item,
+							child_menu_item_txt = obj_nav and obj_nav.child_menu_item_txt,
+							child_menu_item_idx = obj_nav and obj_nav.child_menu_item_idx,
+						})
+						obj_ret = process(obj_child, title_child, nil, obj_root, tbl_open_path)
+						if	obj_ret ~= "exit"
+						then	obj_rem = table.remove(tbl_ReOp_path)
+						end
+					end
+				elseif	menu_item.action
+				then	if menu_item.action(obj, obj_key_child, title_child, item_props) == "break" then return end
+				end
+			end
+		end
+		if not	menu_item
+		and not obj_ret
+		then	obj_ret = "exit"
+		end
+	-- until the user is bored and goes back ;)
+	until	obj_ret == "exit" or
+		obj_ret == "back"
+	if	obj_ret == "back"
+	then	--[[ no back-propagation allowed!
+		so that the one back will do only one backstep:]]
+		obj_ret = nil
+	end
+	return	obj_ret -- or not menu_item and "exit"
+end
+
+local function fnc_upvals_collect(fnc_inp, num_vals)
+	local	tbl_upvals = {}
+	local	ii_key, ii_val
+	-- n: debug.getinfo(f).nups
+	for	ii = 1, num_vals or 1000
+	do	ii_key, ii_val = debug.getupvalue(fnc_inp, ii)
+		if not ii_key then num_vals = ii - 1; break end
+		tbl_upvals[ii_key] = ii_val
+	end
+	return tbl_upvals, num_vals
+end
+
+local function syncUpvalues(f, t, n)
+	-- n: debug.getinfo(f).nups
+	for i = (n or -1), (n and 1 or -1000), -1
+	do
+		local	k, v = debug.getupvalue(f, i)
+		if not	k then break end
+		if	t[k] ~= v
+		then	assert(k == debug.setupvalue (f, i, t[k]))
+		end
+	end
+end
+
+brkeys = {
+	{ BreakKey = 'F9', name = 'registry',
+		action = function(info) process(debug.getregistry(), 'debug.getregistry:') end;},
+	{ BreakKey = 'Ctrl+Insert',
+		action = function(obj, key)
+			-- todo: escape slashes etc
+			local copy_val, copy_type = fnc_val_fmt(obj[key])
+			far.CopyToClipboard(copy_val)
+		end},
+	{ BreakKey = 'CtrlShift+Insert',
+		action = function(obj, key)
+			local copy_val, copy_type = fnc_val_fmt(key, 'list')
+			far.CopyToClipboard(copy_val)
+		end},
+	{ BreakKey = 'CtrlAlt+Insert',
+		action = function(obj, key, kpath)
+			local copy_val, copy_type = fnc_val_fmt(key, 'list')
+			far.CopyToClipboard(kpath:gsub('^_G%.','')..copy_val)
+		end},
+	{ BreakKey = 'Ctrl+Up',	name = 'upvalues',
+		action = function(obj, key, kpath)
+-- ###
+local	fnc1 = obj[key]
+if	type(fnc1) == 'function'
+then	local	dbg_info = debug.getinfo(fnc1)
+	if	dbg_info.what ~= 'C'
+	or	true -- todo
+	then	local	tbl_upvals, num_vals = fnc_upvals_collect(fnc1)
+		if	num_vals > 0
+		then	process(tbl_upvals, 'upvalues: '..kpath)
+			syncUpvalues(fnc1, tbl_upvals, num_vals)
+		else	far.Message(
+				"No upvalues",
+				dbg_info.name
+					or key ~= "func" and key
+					or string.gsub(string.gsub(kpath, "debug.getinfo: ", ""), ".func$", ""),
+				nil,
+				"w"
+			)
+		end
+	end
+end
+-- @@@
+		end; },
+	{ BreakKey = 'Ctrl+Down', name = 'env',
+		action = function(obj, key, kpath)
+-- ###
+local	f = obj[key];
+local	t = type(f)
+if	t == 'function'
+or	t == 'userdata'
+or	t == 'thread'
+then
+	local env = debug.getfenv(f)
+	local env_is_glob = env == _G
+        process(env, 'getfenv: '..kpath..(env_is_glob and " (_G)" or ""))
+	--[[
+	local dlg_res = far.Message('Show global environment?', '_G', ';OkCancel')
+	if (env ~= _G or dlg_res == 1) and env and next(env)
+	then process(env, 'getfenv: '..kpath)
+	end --]]
+end
+-- @@@
+		end;},
+	{ BreakKey = 'Ctrl+Right', name = 'params',
+		action = function(obj, key, kpath)
+-- ###
+local f = obj[key]
+if type(f) == 'function'
+then
+	local	args, t = getfParamsNames(f)
+	if	args:len() > 0
+	then	process(t, 'params (f): '..kpath)
+		local name = debug.getinfo(f).name
+	--	far.Message(('%s (%s)'):format(name or kpath,args), 'params')
+	end
+end
+-- @@@
+		end;},
+	{ BreakKey = 'Alt+F4', name = 'edit',
+		action = function(obj, key, kpath, props)
+-- ###
+local	fnc_test = obj[key]
+local	test_is_func = type(fnc_test) == 'function'
+local	test_is_info =
+	not	props.__HIDDEN_PROPS_HACK__
+	and	obj.linedefined
+	and	obj.source
+	and type(obj.func) == 'function'
+if 	test_is_func
+or	test_is_info
+then
+	local	fnc_targ = test_is_func and fnc_test or obj.func
+	local	dbg_info = test_is_info and obj or debug.getinfo(fnc_targ, 'Slun')
+	--[[ @Xer0X:do not gives current line:
+	debug.getinfo(fnc_targ, 'Slun') --]]
+	local	filename =
+		dbg_info.source:match("^@(.+)$")
+	local	fileline =
+		dbg_info.currentline and
+		dbg_info.currentline > 0 and
+		dbg_info.currentline
+		or
+		dbg_info.linedefined and
+		dbg_info.linedefined > 0 and
+		dbg_info.linedefined
+	if	filename
+	then	editor.Editor(filename, nil, nil, nil, nil, nil, nil, fileline)
+	end
+end
+-- @@@
+		end;},
+	{ BreakKey = 'F3', name = 'info',
+		action = function(obj, key, kpath)
+-- ###
+local	f = obj[key]
+if	type(f) == 'function'
+then	process(debug.getinfo(f), 'debug.getinfo: '..kpath)
+elseif	type(f) == 'thread'
+then	far.Message(debug.traceback(f, "level 0", 0):gsub('\n\t','\n   '), 'debug.traceback: '..kpath, nil, "l")
+--	far.Show('debug.traceback: '..kpath..debug.traceback(f, ", level 0", 0))
+end
+-- @@@
+		end; },
+	{ BreakKey = 'F4',
+		action = function(obj, key, kpath) return key ~= nil and editValue(obj, key, kpath) end },
+	{ BreakKey = 'Ctrl+F',
+		action = function()	omit['function']= not omit['function']	end },
+	{ BreakKey = 'Ctrl+T',
+		action = function()	O.tables_first	= not O.tables_first	end },
+	{ BreakKey = 'Ctrl+I',
+		action = function()	O.ignore_case	= not O.ignore_case	end },
+	{ BreakKey = 'Ctrl+M', name = 'mt',
+		action = function(obj, key, kpath)
+-- ###
+local mt = key ~= nil and debug.getmetatable(obj[key])
+return mt and process(mt, 'METATABLE: '..kpath)
+-- @@@
+		end; },
+	{ BreakKey = 'DELETE',	action = function(obj, key, kpath) return key ~= nil and editValue(obj, key, kpath, true) end },
+	{ BreakKey = 'INSERT',	action = function(obj, key, kpath) insertValue(obj, kpath:sub(1, -(#tostring(key) + 2))) end },
+	{ BreakKey = 'F1',	action = function() nfo:help() end},
+	{ BreakKey = nil,	name = 'addBrKeys',
+		action = function(obj, key)
+-- ###
+local	addbrkeys = obj[key]
+for	ii = 1, #addbrkeys
+do	local bk = addbrkeys[ii]
+	local BreakKey = bk.BreakKey
+	local pos
+	for jj = 1, #brkeys do if brkeys[jj].BreakKey == BreakKey then pos = jj; break end end
+	if	pos
+	then	brkeys[pos] = bk
+	else	table.insert(brkeys, bk)
+		if bk.name then	brkeys[bk.name] = bk.action end
+	end
+end
+return "break"
+-- @@@
+		end; },
+	{ BreakKey = 'BS', name = "goBack", action = function() return "goBack" end }
 }
+
+--[[ if LuaJIT is used,
+maybe we can show some more function info]]
+if	jit
+then    local funcinfo = require('jit.util').funcinfo
+	table.insert(brkeys, {
+		BreakKey = 'Shift+F3',
+		action = function(obj, key, kpath)
+			if	key ~= nil
+			and	type(obj[key]) == 'function'
+			then
+				local name_x = debug.getinfo(obj[key], "n").name
+				far.Message(name_x)
+				process(funcinfo(obj[key]), 'jit.util.funcinfo: '..kpath)
+			end
+		end,
+		name = 'jitinfo'
+	})
+end
+
+for ii = 1, #brkeys
+do	local bk = brkeys[ii];
+	if bk.name then	brkeys[bk.name] = bk.action end
+end
+
+nfo.execute = function() process(_G, '') --[[ require("le")(_G,'_G') ]] end
+
+if	Macro
+then
+-- ###
+Macro { description = "Lua Explorer (Advanced)";
+	area = "Common"; key = "RCtrlShiftF12";
+	action = nfo.execute
+}
+-- @@@
+elseif	_filename
+then	process(_G, '')
+else	return process
+-- if ... == "le" then
+end
+
+--[[ it's possible to call via lua:, e.g. from user menu:
+lua:dofile(win.GetEnv("FARPROFILE")..[[\Macros\scripts\le.lua] ])(_G,'_G')
+lua:require("le")(_G,'_G')
+--]]
+-- @@@@@
