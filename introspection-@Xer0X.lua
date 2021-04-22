@@ -1,3 +1,6 @@
+--[[
+if true then return end --]]
+
 --[[		(c) Xer0X
 	"Православие или Смерть!" group
 
@@ -7,6 +10,9 @@
 
 if not Xer0X then Xer0X = { } end
 require("Lib-Common-@Xer0X")
+local fnc_norm_script_path	= Xer0X.fnc_norm_script_path
+
+local fnc_str_trim = Xer0X.fnc_str_trim1
 
 Xer0X.fnc_definition_parse = function(line)
 	assert(type(line) == "string")
@@ -20,14 +26,14 @@ Xer0X.fnc_definition_parse = function(line)
 	match = line:match("%s*function%s*%(")
 	if match then return "(anonymous)" end
 	return "(anonymous)"
-end
+end -- fnc_definition_parse
 
 --[[ Private:
 Tries to guess a function's name when the debug info structure does not have it.
 It parses either the file or the string where the function is defined.
 Returns '?' if the line where the function is defined is not found
 --]]
-Xer0X.fnc_func_name_guess = function(dbg_info)
+Xer0X.fnc_func_name_read = function(dbg_info)
 	local	line_str, line_def, line_cur, src_code
 	local	src_code = ""
 	if	type(dbg_info.source) == "string" and dbg_info.source:sub(1, 1) == "@"
@@ -69,74 +75,226 @@ Xer0X.fnc_func_name_guess = function(dbg_info)
 	end
 	if src_code == "" then src_code = nil end
 	return line_def and Xer0X.fnc_definition_parse(line_def) or "?", src_code, line_cur
-end -- fnc_func_name_guess
+end -- fnc_func_name_read
 
-Xer0X.fnc_source_info_get = function(src_thr, src_lev, show_info, mode_locals, mode_upvals, with_nums, tbl_locals, tbl_upvals, tbl_meta, tbl_lcvrid)
-	if	type(src_thr) ~= "thread" and
-		type(src_thr) ~= "nil"
-	then	src_thr, src_lev, show_info, mode_locals, mode_upvals, tbl_locals, tbl_upvals, tbl_meta, tbl_lcvrid = nil,
-		src_thr, src_lev, show_info, mode_locals, mode_upvals, tbl_locals, tbl_upvals, tbl_meta, tbl_lcvrid
+Xer0X.fnc_menu_dbg_inf_key_weight = function (menu_item_key)
+	if	menu_item_key:match("^ERROR$")
+	then	return 1
+	elseif	menu_item_key:match("^name$")
+	then	return 2
+	elseif	menu_item_key:match("^what$")
+	then	return 3
+	elseif	menu_item_key:match("^namewhat$")
+	then	return 4
+	elseif	menu_item_key:match("^nups$")
+	then	return 5
+	elseif	menu_item_key:match("^nparams$")
+	then	return 6
+	elseif	menu_item_key:match("^isvararg$")
+	then	return 7
+	elseif	menu_item_key:match("^linedefined$")
+	then	return 8
+	elseif	menu_item_key:match("^currentline_txt$")
+	then	return 9
+	elseif	menu_item_key:match("^currentline$")
+	then	return 10
+	elseif	menu_item_key:match("^lastlinedefined$")
+	then	return 11
+	elseif	menu_item_key:match("^source_code$")
+	then	return 12
+	elseif	menu_item_key:match("^short_src$")
+	then	return 13
+	elseif	menu_item_key:match("^source$")
+	then	return 14
+	elseif	menu_item_key:match("^func$")
+	then	return 15
 	end
-	local dbg_info, LoadedMacros, mcr_src, mcr_inf
-	if not tbl_upvals then tbl_upvals = {} end
-	if not tbl_locals then tbl_locals = {} end
-	if not tbl_locals._VAR_MAP then tbl_locals._VAR_MAP = { i2n = { }, n2i = { }, raw = { } } end
-	local dbg_props = nil
+end
+
+Xer0X.fnc_exec_time_info_read = function(src_thr, src_lev, tbl_opts, tbl_upvals, tbl_params, tbl_vararg, tbl_locals)
+	if	type(src_thr) ~= "thread"
+	and	type(src_thr) ~= "nil"
+	then	src_thr, src_lev, tbl_opts, mode_upvals, tbl_params, tbl_vararg, tbl_locals = nil,
+		src_thr, src_lev, tbl_opts, mode_upvals, tbl_params, tbl_vararg, tbl_locals
+	end
+	local opts = tbl_opts
+	local show_info = opts.show_info
+	local with_nums = opts.with_nums
+	local mode_upvals=opts.mode_upvals or 2
+	local mode_vararg=opts.mode_vararg or 2
+	local mode_locals=opts.mode_locals or 2
+	local mode_params=opts.mode_params or 2
+	if not tbl_upvals then tbl_upvals = { } end
+	if not tbl_vararg then tbl_vararg = { } end
+	if not tbl_locals then tbl_locals = { } end
+	if not tbl_params then tbl_params = { } end
+--	src_lev = (src_lev or 1) + (src_thr and 0 or 1)
+	local dbg_info, LoadedMacros, mcr_src, mcr_inf, dbg_props
 	local is_same_thr = not src_thr or coroutine.running() == src_thr
+--	if is_same_thr then src_thr = nil end
 	if	is_same_thr
-	then	dbg_info = debug.getinfo(src_lev, dbg_props)
+	then	dbg_info = debug.getinfo(src_lev, dbg_props) -- "nSlfu" ?
 	else	dbg_info = debug.getinfo(src_thr, src_lev, dbg_props)
 	end
 	if	dbg_info
-	then	local fnc_name, fnc_code, curr_line = Xer0X.fnc_func_name_guess(dbg_info)
+	then	local fnc_name, fnc_code, curr_line = Xer0X.fnc_func_name_read(dbg_info)
 		if not	dbg_info.name
 		then	dbg_info.name = fnc_name
                 end
-		dbg_info.currentline_txt = curr_line
+		dbg_info.currentline_txt = fnc_str_trim(curr_line)
 		dbg_info.source_code = fnc_code
 		mcr_src = dbg_info.source:sub(2)
 		mcr_inf = win.GetFileInfo(mcr_src)
-		if	mode_upvals and mode_upvals > 0
-		then	for	ii = 1, dbg_info.nups
-			do	local n, v = debug.getupvalue(dbg_info.func, ii)
-				if band(mode_upvals, 2) == 2
-				then tbl_upvals[with_nums and "["..ii.."] "..n or n] = v or "<NIL>"
+		dbg_info._LEX_FNC_KEY_WEIGHT = Xer0X.fnc_menu_dbg_inf_key_weight
+		if	dbg_info.namewhat == ""
+		then	dbg_info.namewhat = nil
+		end
+		if	dbg_info.linedefined == -1
+		then	dbg_info.linedefined = nil
+		end
+		if	dbg_info.currentline == -1
+		then	dbg_info.currentline = nil
+		end
+		if	dbg_info.lastlinedefined == -1
+		then	dbg_info.lastlinedefined = nil
+		end
+		if	mode_upvals > 0
+		-- check for func as it may be nil for tail calls:
+		and	dbg_info.func
+		then
+			local tbl_i2n, tbl_n2i, tbl_raw = { }, { }, { }
+			for	ii = 1, dbg_info.nups
+			do	local var_N, var_V = debug.getupvalue(dbg_info.func, ii)
+				if	var_V == nil
+				then	var_V = "<NIL>"
 				end
+				tbl_upvals[(with_nums and ii..".) " or "")..var_N] = var_V
+				tbl_raw[var_N]	= var_V
+				tbl_n2i[var_N]	= ii
+				tbl_i2n[ii]	= var_N
+			end
+			tbl_upvals._LEX_VAR_MAP = {
+				raw = tbl_raw,
+				n2i = tbl_n2i,
+				i2n = tbl_i2n,
+				cnt = dbg_info.nups
+			}
+			tbl_upvals._LEX_FNC_KEY_WEIGHT = function(menu_item_key) return tbl_n2i[menu_item_key] end
+		end
+		if	mode_vararg > 0
+		then
+			tbl_vararg._LEX_VARARG_VALS = { }
+			local	ii = 0
+			while	true
+			do
+				ii = ii + 1
+				local	var_N, var_V
+				if	is_same_thr
+				then	var_N, var_V = debug.getlocal(src_lev, -ii)
+				else	var_N, var_V = debug.getlocal(src_thr, src_lev, -ii)
+				end
+			        if not	var_N then break end
+				if	var_V == nil
+				then	var_V = "<NIL>"
+				end
+				if not	var_N
+				then	break
+				end
+				tbl_vararg[var_N:gsub("%)$", " "..ii..")")] = var_V
+				table.insert(tbl_vararg._LEX_VARARG_VALS, var_V)
 			end
 		end
-		if	mode_locals and mode_locals > 0
-		then	local	ii = 0
+		if	mode_locals > 0
+		then
+			local tbl_i2n, tbl_n2i, tbl_raw, tbl_arg = { }, { }, { }, { }
+			local	ii = 0
+			local	tbl_mult_N = { }
 			while	true
 			do	ii = ii + 1
-				local n, v
+				local	var_N, var_V
 				if	is_same_thr
-				then	n, v = debug.getlocal(src_lev, ii)
-				else	n, v = debug.getlocal(src_thr, src_lev, ii)
+				then	var_N, var_V = debug.getlocal(src_lev, ii)
+				else	var_N, var_V = debug.getlocal(src_thr, src_lev, ii)
 				end
-				v = type(v) == "nil" and "<NIL>" or v
-			        if not n then break end
-				if band(mode_locals, 2) == 2
-				then tbl_locals[with_nums and "["..ii.."] "..n or n] = v
+			        if not	var_N then break end
+				if	var_V == nil
+				then	var_V = "<NIL>"
 				end
-				tbl_locals._VAR_MAP.raw[n] = v
-				tbl_locals._VAR_MAP.n2i[n] = ii
-				tbl_locals._VAR_MAP.i2n[ii]= n
+				local	var_M = true and (
+						tbl_locals[var_N] or
+						tbl_mult_N[var_N]
+							)
+				if	var_M
+				then    -- already exists with the same name
+					local var_C = (tbl_mult_N[var_N] or 1) + 1
+					tbl_mult_N[var_N] = var_C
+					if	var_C == 2
+					then	local varNN = string.format("%s (#1)", var_N)
+						local var_i =
+						tbl_n2i[var_N]
+						tbl_i2n[var_i] = varNN
+						tbl_raw[var_N],
+						tbl_raw[varNN] = nil,
+						tbl_raw[var_N]
+						tbl_n2i[var_N],
+						tbl_n2i[varNN] = nil,
+						tbl_n2i[var_N]
+						tbl_locals[var_N],
+						tbl_locals[varNN] = nil,
+						tbl_locals[var_N]
+					end
+					var_N = string.format("%s (#%s)", var_N, var_C)
+				end
+				if	band(mode_locals, 2) == 2
+				then	tbl_locals[(with_nums and ii..".) " or "")..var_N] = var_V
+				end
+				if	band(mode_params, 2) == 2
+				and	ii <= dbg_info.nparams
+				then	tbl_params[(with_nums and ii..".) " or "")..var_N] = var_V
+				end
+				tbl_raw[var_N]	= var_V
+				tbl_n2i[var_N]	= ii
+				tbl_i2n[ii]	= var_N
 			end
+			tbl_locals._LEX_VAR_MAP = {
+				arg = tbl_arg,
+				raw = tbl_raw,
+				n2i = tbl_n2i,
+				i2n = tbl_i2n,
+				cnt = ii - 1 ,
+			}
+			tbl_locals._LEX_FNC_KEY_WEIGHT = function(menu_item_key) return tbl_n2i[menu_item_key] end
+			tbl_params._LEX_FNC_KEY_WEIGHT = function(menu_item_key) return tbl_n2i[menu_item_key] end
 		end
 	elseif	type(src_lev) == "string"
 	then	mcr_inf = win.GetFileInfo(src_lev)
 		if mcr_inf then mcr_src = src_lev end
 	end
 	if mcr_src then mcr_src = far.ConvertPath(mcr_src, 1) end
-	return mcr_src, mcr_inf, mcr_inf and mcr_inf.LastWriteTime, tbl_locals, tbl_upvals, dbg_info
-end -- fnc_source_info_get
+	return mcr_src, mcr_inf, mcr_inf and mcr_inf.LastWriteTime, tbl_upvals, tbl_params, tbl_vararg, tbl_locals, dbg_info
+end -- fnc_exec_time_info_read
 
 
-local all_the_stuff = {}
-for ii = 0, 1000 do
-	local mcr_src, mcr_inf, LastWriteTime, tbl_locals, tbl_upvals, dbg_info = Xer0X.fnc_source_info_get(nil, ii, nil, 2, 2, false)
+local all_the_stuff = { }
+for ii = 0, 1000 do 
+	local mcr_src, mcr_inf, LastWriteTime, tbl_upvals, tbl_params, tbl_vararg, tbl_locals, dbg_info
+		= Xer0X.fnc_exec_time_info_read(ii, {
+			mode_upvals = 2,
+			mode_params = 2,
+			mode_vararg = 2,
+			mode_locals = 2,
+				})
 	if not dbg_info then break end
-	all_the_stuff[ii + 1] = { mcr_src = mcr_src, mcr_inf = mcr_inf, LastWriteTime = LastWriteTime, tbl_locals = tbl_locals, tbl_upvals = tbl_upvals, dbg_info = dbg_info }
+	all_the_stuff[ii + 1] = {
+		mcr_src = mcr_src,
+		mcr_inf = mcr_inf,
+		LastWriteTime = LastWriteTime,
+		tbl_upvals = tbl_upvals,
+		tbl_params = tbl_params,
+		tbl_vararg = tbl_vararg,
+		tbl_locals = tbl_locals,
+		dbg_info = dbg_info
+	}
 	if	tbl_upvals.LoadedMacros
 	then    Xer0X.utils = tbl_upvals
 		Xer0X.utils_local = tbl_locals
@@ -149,7 +307,7 @@ _G.Xer0X.internals = all_the_stuff
 local tbl_macrolist_marks = { }
 local tbl_mcr_items_marks = { }
 
-Xer0X.fnc_find_macrolist = function(mark_id)
+Xer0X.fnc_macrolist_find = function(mark_id)
 	mark_id = mark_id and ":"..mark_id or ":?"
 	local ii_from, all_the_stuff
 	local	tbl_mcr_lst_upv,
@@ -166,7 +324,7 @@ Xer0X.fnc_find_macrolist = function(mark_id)
 	if	tbl_mcr_lst_loc_idx
 	then	dbg_inf = debug.getinfo(tbl_mcr_lst_loc_idx - 1)
 		if	dbg_inf
-		then	var_key, var_val = debug.getlocal(tbl_mcr_lst_loc_idx - 1, Xer0X.env_mcr_lst_loc._VAR_MAP.n2i.macrolist)
+		then	var_key, var_val = debug.getlocal(tbl_mcr_lst_loc_idx - 1, Xer0X.env_mcr_lst_loc._LEX_VAR_MAP.n2i.macrolist)
 		end
 		if	var_key == "macrolist"
 		then	tbl_mcr_lst_loc = var_val
@@ -174,7 +332,7 @@ Xer0X.fnc_find_macrolist = function(mark_id)
 		else	found = false
 		end
 		if	found
-		then	var_key, var_val = debug.getlocal(tbl_mcr_items_L_idx - 1, Xer0X.env_mcr_items_L._VAR_MAP.n2i.menuitems)
+		then	var_key, var_val = debug.getlocal(tbl_mcr_items_L_idx - 1, Xer0X.env_mcr_items_L._LEX_VAR_MAP.n2i.menuitems)
 			if	var_key == "menuitems"
 			then	tbl_mcr_items_L = var_val
 				goto end_of_proc
@@ -185,8 +343,8 @@ Xer0X.fnc_find_macrolist = function(mark_id)
 	ii_from = found and (tbl_mcr_lst_loc_idx or tbl_mcr_lst_upv_idx) or 1
 	all_the_stuff = { }
 	for ii = ii_from, 1000 do
-		local mcr_src, mcr_inf, LastWriteTime, tbl_locals, tbl_upvals, dbg_inf
-			= Xer0X.fnc_source_info_get(nil, ii, nil, 2, 2, false)
+		local mcr_src, mcr_inf, LastWriteTime, tbl_upvals, tbl_params, tbl_vararg, tbl_locals, dbg_inf
+			= Xer0X.fnc_exec_time_info_read(nil, ii, { mode_upvals = 2, mode_params = 2, mode_locals = 2 })
 		if not dbg_inf then break end
 		all_the_stuff[ii] = { mcr_src = mcr_src, mcr_inf = mcr_inf, LastWriteTime = LastWriteTime, tbl_locals = tbl_locals, tbl_upvals = tbl_upvals, dbg_inf = dbg_inf }
 		if	tbl_upvals.macrolist
@@ -224,7 +382,7 @@ Xer0X.fnc_find_macrolist = function(mark_id)
 	end
 	::end_of_proc::
 	return found, tbl_mcr_lst_upv, tbl_mcr_lst_loc, tbl_mcr_items_L
-end
+end -- fnc_macrolist_find
 
 Xer0X.fnc_mcr_src_tbl_clean = function(mcr_src, tbl_mcr)
 	mcr_src = string.lower(mcr_src)
@@ -232,12 +390,12 @@ Xer0X.fnc_mcr_src_tbl_clean = function(mcr_src, tbl_mcr)
 	local mcr_cnt = #tbl_mcr
 	local mcr_rem = 0
 	local ii_mcr, ii_skip, ii_guid
-	for	ii = 1, mcr_cnt
+	for ii = 1, mcr_cnt 
 	do	ii_mcr = tbl_mcr[ii]
-		if  ii_mcr and type(ii_mcr) == "table"
-		then
-			ii_skip = 0
-			if
+		if 	ii_mcr
+		and	type(ii_mcr) == "table"
+		then	ii_skip = 0
+			if	-- !! we may have macros without FileName property
 				ii_mcr.FileName
 			and	mcr_src == string.lower(ii_mcr.FileName)
 			then	mcr_rem = mcr_rem + 1
@@ -283,7 +441,7 @@ Xer0X.fnc_mcr_src_agg_clean = function(mcr_src, tbl_agg)
 			end
 		end
 	end
-	for	ii_agg = 1, #tbl_agg
+	for	ii_agg = 1, #tbl_agg 
 	do	for	ii_mcr, tbl_mcr in pairs(tbl_agg[ii_agg])
 		do      if tbl_mcr.FileName
 			then	Xer0X.fnc_mcr_src_tbl_clean(mcr_src, tbl_agg[ii_agg])
@@ -334,7 +492,8 @@ Xer0X.fnc_macro_one_load = function(mcr_info, mcr_path)
 	collectgarbage("collect")
 	local	fnc, msg = loadfile(mcr_path)
 	if not	fnc
-	then	far.Message(msg, "Error loading macro file", nil, "w") return
+	then	far.Message(msg, "Error loading macro file", nil, "w")
+		return
 	end
 	local tbl_env_mcr_ini = {
 		Macro		= function(srctable) Xer0X.utils.AddRegularMacro(	srctable, mcr_path) end,
@@ -344,7 +503,7 @@ Xer0X.fnc_macro_one_load = function(mcr_info, mcr_path)
 		PanelModule	= function(srctable) Xer0X.utils.AddPanelModule(	srctable, mcr_path) end,
 		ContentColumns	= function(srctable) Xer0X.utils.AddContentColumns(	srctable, mcr_path) end,
 		LoadRegularFile	= Xer0X.utils_local.LoadRegularFile
-			}
+	}
 	local fnc_dummy = function() end
 	local tbl_no_fnc_list = { "NoMacro", "NoEvent", "NoMenuItem", "NoCommandLine", "NoPanelModule", "NoContentColumns" }
 	local mt_g = { __index = _G }
@@ -353,7 +512,7 @@ Xer0X.fnc_macro_one_load = function(mcr_info, mcr_path)
 	setfenv(fnc, tbl_env_mcr_ini)
 	local	ret, msg = pcall(fnc, mcr_path)
 	if not	ret
-	then	far.Message(msg, "Error loading macro func (introspection-@Xer0X)", nil, "w")
+	then far.Message(msg, "Error loading macro func (introspection-@Xer0X)", nil, "w")
 	end
 end
 
@@ -375,7 +534,10 @@ Xer0X.fnc_file_whoami = function(inp_args, from_level, details)
 	then	if	string.match(dbg_info.short_src, "^%[.*%]$")
 		then	own_file_path = dbg_info.short_src
 		else	own_file_path = dbg_info.source:match("^@(.+)")
-			own_file_fold, own_file_name, own_file_extn = string.match(own_file_path, "(.-)([^/\\]+)([.][^.]+)$")
+			own_file_fold,
+			own_file_name,
+			own_file_extn
+				= string.match(own_file_path, "(.-)([^/\\]+)([.][^.]+)$")
 		end
 	end
 	local	own_mdl_head, own_mdl_tail, as_module
@@ -392,7 +554,18 @@ Xer0X.fnc_file_whoami = function(inp_args, from_level, details)
 			own_file_fold:match("\\("..own_mdl_head..")\\$")==own_mdl_head
 				)
 	end
-	return as_module, inp_args, own_file_path, own_file_fold, own_file_name, own_file_extn, dbg_info.short_src, dbg_info.name, dbg_info.currentline, dbg_info
+	return	
+		as_module,		
+		inp_args,		
+		own_file_path,		
+		own_file_fold,		
+		own_file_name,		
+		own_file_extn,		
+		dbg_info.short_src,	
+		dbg_info.name or
+		dbg_info.what,		
+		dbg_info.currentline,	
+		dbg_info		
 end
 
 Xer0X.fnc_mcr_src_reload = function(mcr_src, mcr_src_inf_mod, force)
@@ -408,9 +581,13 @@ return {
 	fnc_mcr_src_all_clean	= fnc_mcr_src_all_clean,
 	fnc_mcr_src_fnc_clean	= fnc_mcr_src_fnc_clean,
 	fnc_mcr_src_tbl_clean	= fnc_mcr_src_tbl_clean,
-	fnc_source_info_get	= fnc_source_info_get,
-	fnc_func_name_guess	= fnc_func_name_guess,
+	fnc_exec_time_info_read	= fnc_exec_time_info_read,
+	fnc_func_name_read	= fnc_func_name_read,
 	fnc_macro_dir_load	= fnc_macro_dir_load,
 	fnc_macro_one_load	= fnc_macro_one_load,
 	fnc_definition_parse	= fnc_definition_parse,
+	fnc_menu_dbg_inf_key_weight
+				= fnc_menu_dbg_inf_key_weight,
 }
+
+-- @@@@@
