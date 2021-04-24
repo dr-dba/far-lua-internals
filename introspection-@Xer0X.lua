@@ -17,11 +17,13 @@ local fnc_str_trim = Xer0X.fnc_str_trim1
 Xer0X.fnc_definition_parse = function(line)
 	assert(type(line) == "string")
 	local match
-	match = line:match("^%s*function%s+(%w+)")
+	match = line:match("^%s*function%s*([%w_.]+[.]?[%w_]+)") 
 	if match then return match end
-	match = line:match("^%s*local%s+function%s+(%w+)")
+	match = line:match("^%s*local%s+function%s*([%w_]+)")
 	if match then return match end
-	match = line:match("^%s*local%s+(%w+)%s+=%s+function")
+	match = line:match("^%s*local%s+([%w_]+)%s*=%s*function")
+	if match then return match end
+	match = line:match("^%s*([%w_.]+[.]?[%w_]+)%s*=%s*function")
 	if match then return match end
 	match = line:match("%s*function%s*%(")
 	if match then return "(anonymous)" end
@@ -34,9 +36,10 @@ It parses either the file or the string where the function is defined.
 Returns '?' if the line where the function is defined is not found
 --]]
 Xer0X.fnc_func_name_read = function(dbg_info)
-	local	line_str, line_def, line_cur, src_code
-	local	src_code = ""
-	if	type(dbg_info.source) == "string" and dbg_info.source:sub(1, 1) == "@"
+	local	line_str, line_def, line_cur
+	local 	tbl_src_code = { }
+	if	type(dbg_info.source) == "string"
+	and	dbg_info.source:sub(1, 1) == "@"
 	then
 		local	fileH, err = io.open(dbg_info.source:sub(2), "r")
 		if not	fileH
@@ -53,7 +56,7 @@ Xer0X.fnc_func_name_read = function(dbg_info)
 			end
 			if	line_num >= dbg_info.linedefined and
 				line_num <= dbg_info.lastlinedefined
-			then	src_code = src_code..line_str..string.char(10)..string.char(13)
+			then	tbl_src_code[#tbl_src_code + 1] = line_str
 			end
 		end
 		fileH:close()
@@ -69,13 +72,16 @@ Xer0X.fnc_func_name_read = function(dbg_info)
 			end
 			if	line_num >= dbg_info.linedefined and
 				line_num <= dbg_info.lastlinedefined
-			then	src_code = src_code..line_str..string.char(10)..string.char(13)
+			then	tbl_src_code[#tbl_src_code + 1] = line_str
 			end
 		end
 	end
-	if src_code == "" then src_code = nil end
-	return line_def and Xer0X.fnc_definition_parse(line_def) or "?", src_code, line_cur
+	return
+		line_def and Xer0X.fnc_definition_parse(line_def) or "?",
+		table.concat(tbl_src_code, string.char(10)..string.char(13)),
+		line_cur
 end -- fnc_func_name_read
+
 
 Xer0X.fnc_menu_dbg_inf_key_weight = function (menu_item_key)
 	if	menu_item_key:match("^ERROR$")
@@ -135,6 +141,14 @@ Xer0X.fnc_exec_time_info_read = function(src_thr, src_lev, tbl_opts, tbl_upvals,
 	if	is_same_thr
 	then	dbg_info = debug.getinfo(src_lev, dbg_props) -- "nSlfu" ?
 	else	dbg_info = debug.getinfo(src_thr, src_lev, dbg_props)
+		if	src_lev == 0
+		and	opts.orig_err_msg_line
+		and	opts.orig_err_msg_line	>= 0
+		and	dbg_info.linedefined	>= 0
+		and	dbg_info.lastlinedefined>= 0
+		and	dbg_info.currentline	==-1
+		then	dbg_info.currentline = opts.orig_err_msg_line
+		end
 	end
 	if	dbg_info
 	then	local fnc_name, fnc_code, curr_line = Xer0X.fnc_func_name_read(dbg_info)
@@ -296,10 +310,10 @@ for ii = 0, 1000 do
 		dbg_info = dbg_info
 	}
 	if	tbl_upvals.LoadedMacros
-	then    Xer0X.utils = tbl_upvals
-		Xer0X.utils_local = tbl_locals
+	then    Xer0X.utils	=	tbl_upvals
+		Xer0X.utils_local =	tbl_locals
 	elseif	tbl_upvals.KeyMacro
-	then	Xer0X.key_mcr_inf = tbl_upvals
+	then	Xer0X.key_mcr_inf =	tbl_upvals
 		Xer0X.key_mcr_inf_loc = tbl_locals
 	end
 end
@@ -554,7 +568,7 @@ Xer0X.fnc_file_whoami = function(inp_args, from_level, details)
 			own_file_fold:match("\\("..own_mdl_head..")\\$")==own_mdl_head
 				)
 	end
-	return	
+	return
 		as_module,		
 		inp_args,		
 		own_file_path,		
