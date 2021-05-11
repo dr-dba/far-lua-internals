@@ -8,11 +8,9 @@ if true then return end --]]
 	aka live code analysis.
 ]]
 
-if not Xer0X then Xer0X = { } end
-require("Lib-Common-@Xer0X")
+local Xer0X = require("Lib-Common-@Xer0X")
 local fnc_norm_script_path	= Xer0X.fnc_norm_script_path
-
-local fnc_str_trim = Xer0X.fnc_str_trim1
+local fnc_str_trim		= Xer0X.fnc_str_trim1
 
 Xer0X.fnc_definition_parse = function(line)
 	assert(type(line) == "string")
@@ -290,7 +288,8 @@ end -- fnc_exec_time_info_read
 
 
 local all_the_stuff = { }
-for ii = 0, 1000 do 
+for ii = 0, 1000 
+do
 	local mcr_src, mcr_inf, LastWriteTime, tbl_upvals, tbl_params, tbl_vararg, tbl_locals, dbg_info
 		= Xer0X.fnc_exec_time_info_read(ii, {
 			mode_upvals = 2,
@@ -500,13 +499,18 @@ Xer0X.fnc_mcr_src_all_clean = function(mcr_src, tbl_what)
 	if not tbl_what or tbl_what.cncol then Xer0X.fnc_mcr_src_fnc_clean(mcr_src, Xer0X.utils.ContentColumns) end
 end
 
-Xer0X.fnc_macro_one_load = function(mcr_info, mcr_path)
+local tbl_no_fnc_list = { "NoMacro", "NoEvent", "NoMenuItem", "NoCommandLine", "NoPanelModule", "NoContentColumns" }
+Xer0X.fnc_macro_one_load = function(
+ mcr_info,
+	mcr_path, no_clean, no_exec
+		)
 	mcr_path = far.ConvertPath(mcr_path, 1)
-	Xer0X.fnc_mcr_src_all_clean(mcr_path)
-	collectgarbage("collect")
-	local	fnc, msg = loadfile(mcr_path)
-	if not	fnc
-	then	far.Message(msg, "Error loading macro file", nil, "w")
+	if not	no_clean
+	then	Xer0X.fnc_mcr_src_all_clean(mcr_path)
+	end
+	local	fnc_file, msg_file = loadfile(mcr_path)
+	if not	fnc_file
+	then	far.Message(msg_file, "Error loading macro file", nil, "w")
 		return
 	end
 	local tbl_env_mcr_ini = {
@@ -519,20 +523,34 @@ Xer0X.fnc_macro_one_load = function(mcr_info, mcr_path)
 		LoadRegularFile	= Xer0X.utils_local.LoadRegularFile
 	}
 	local fnc_dummy = function() end
-	local tbl_no_fnc_list = { "NoMacro", "NoEvent", "NoMenuItem", "NoCommandLine", "NoPanelModule", "NoContentColumns" }
-	local mt_g = { __index = _G }
-	for _, fnc_name in ipairs(tbl_no_fnc_list) do tbl_env_mcr_ini[fnc_name] = fnc_dummy; end
-	setmetatable(tbl_env_mcr_ini, mt_g)
-	setfenv(fnc, tbl_env_mcr_ini)
-	local	ret, msg = pcall(fnc, mcr_path)
-	if not	ret
-	then far.Message(msg, "Error loading macro func (introspection-@Xer0X)", nil, "w")
+	for _, ii_no_fnc_name in ipairs(tbl_no_fnc_list)
+	do tbl_env_mcr_ini[ii_no_fnc_name] = fnc_dummy
 	end
-end
+	local mt_G = { __index = _G }
+	setmetatable(tbl_env_mcr_ini, mt_G)
+	setfenv(fnc_file, tbl_env_mcr_ini)
+	if not	no_exec
+	then	local	exec_ret, exec_msg = pcall(fnc_file, mcr_path)
+		if not	exec_ret
+		then	far.Message(exec_msg, "Error loading macro func (introspection-@Xer0X)", nil, "w")
+		end
+	end
+	local tbl_exinfo = {
+		fnc_file = fnc_file,
+		msg_file = msg_file,
+		exec_ret = exec_ret,
+		exec_msg = exec_msg,
+		mcr_path = mcr_path,
+		mcr_info = mcr_info,
+		no_clean = no_clean,
+		no_exec	 = no_exec ,
+	}
+	return tbl_env_mcr_ini, tbl_exinfo
+end -- fnc_macro_one_load
 
 Xer0X.fnc_macro_dir_load = function(src_dir)
 	far.RecursiveSearch(
-		src_dir ,
+		src_dir, 
 		"*.lua",
 		Xer0X.fnc_macro_one_load,
 		0
@@ -580,7 +598,7 @@ Xer0X.fnc_file_whoami = function(inp_args, from_level, details)
 		dbg_info.what,		
 		dbg_info.currentline,	
 		dbg_info		
-end
+end -- fnc_file_whoami
 
 Xer0X.fnc_mcr_src_reload = function(mcr_src, mcr_src_inf_mod, force)
 	local dt_inf_new = win.GetFileInfo(mcr_src)
@@ -591,17 +609,17 @@ Xer0X.fnc_mcr_src_reload = function(mcr_src, mcr_src_inf_mod, force)
 end
 
 return {
-	fnc_mcr_src_agg_clean	= fnc_mcr_src_agg_clean,
-	fnc_mcr_src_all_clean	= fnc_mcr_src_all_clean,
-	fnc_mcr_src_fnc_clean	= fnc_mcr_src_fnc_clean,
-	fnc_mcr_src_tbl_clean	= fnc_mcr_src_tbl_clean,
-	fnc_exec_time_info_read	= fnc_exec_time_info_read,
-	fnc_func_name_read	= fnc_func_name_read,
-	fnc_macro_dir_load	= fnc_macro_dir_load,
-	fnc_macro_one_load	= fnc_macro_one_load,
-	fnc_definition_parse	= fnc_definition_parse,
+	fnc_mcr_src_agg_clean	= Xer0X.fnc_mcr_src_agg_clean,
+	fnc_mcr_src_all_clean	= Xer0X.fnc_mcr_src_all_clean,
+	fnc_mcr_src_fnc_clean	= Xer0X.fnc_mcr_src_fnc_clean,
+	fnc_mcr_src_tbl_clean	= Xer0X.fnc_mcr_src_tbl_clean,
+	fnc_exec_time_info_read	= Xer0X.fnc_exec_time_info_read,
+	fnc_func_name_read	= Xer0X.fnc_func_name_read,
+	fnc_macro_dir_load	= Xer0X.fnc_macro_dir_load,
+	fnc_macro_one_load	= Xer0X.fnc_macro_one_load,
+	fnc_definition_parse	= Xer0X.fnc_definition_parse,
 	fnc_menu_dbg_inf_key_weight
-				= fnc_menu_dbg_inf_key_weight,
+				= Xer0X.fnc_menu_dbg_inf_key_weight,
 }
 
 -- @@@@@
