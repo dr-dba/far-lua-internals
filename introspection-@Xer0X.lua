@@ -477,8 +477,8 @@ Xer0X.fnc_mcr_src_fnc_clean = function(mcr_src, tbl_fnc)
 	local rem_cnt = 0
 	for	ii_cc = 1, #tbl_fnc - rem_cnt
 	do      for	ii_ccf, ccf in pairs(tbl_fnc[ii_cc - rem_cnt])
-		do	if type(ccf) == "function" then
-				fnc_scr_path = string.match(debug.getinfo(ccf, "S").source, "^@(.+)")
+		do	if type(ccf) == "function"
+			then	fnc_scr_path = string.match(debug.getinfo(ccf, "S").source, "^@(.+)")
 				if mcr_src == string.lower(fnc_scr_path)
 				then	table.remove(tbl_fnc, ii_cc - rem_cnt)
 					rem_cnt = rem_cnt + 1
@@ -558,33 +558,35 @@ Xer0X.fnc_macro_dir_load = function(src_dir)
 end
 
 -- @@@@@ End of the trick with ad-hoc loading macros  @@@@@ ?
-
-Xer0X.fnc_file_whoami = function(inp_args, from_level, details)
-	local	dbg_info = debug.getinfo(from_level or 2, details or "S")
-	local	own_file_path, own_file_fold, own_file_name, own_file_extn
-	if 	dbg_info.source
-	then	if	string.match(dbg_info.short_src, "^%[.*%]$")
-		then	own_file_path = dbg_info.short_src
-		else	own_file_path = dbg_info.source:match("^@(.+)")
-			own_file_fold,
-			own_file_name,
-			own_file_extn
+ 
+Xer0X.fnc_file_whoami = function(inp_args, from_level, details) 
+	local	dbg_info = debug.getinfo(from_level or 2, details or "S") 
+	local	own_file_path, own_file_fold, own_file_name, own_file_extn 
+	if 	dbg_info.source 
+	then	if	string.match(dbg_info.short_src, "^%[.*%]$") 
+		then	own_file_path = dbg_info.short_src 
+		else	own_file_path = dbg_info.source:match("^@(.+)") 
+			own_file_fold, 
+			own_file_name, 
+			own_file_extn 
 				= string.match(own_file_path, "(.-)([^/\\]+)([.][^.]+)$")
 		end
 	end
 	local	own_mdl_head, own_mdl_tail, as_module
-	local	the_mdl_name = type(inp_args) == "table" and #inp_args > 0 and inp_args[1] or inp_args
+	local	the_mdl_name =
+			type(	inp_args) == "table"
+			and	#inp_args > 0
+			and	inp_args[1]
+			or	inp_args
 	if	the_mdl_name
 	and	type(the_mdl_name) == "string"
-	then	own_mdl_head = the_mdl_name:match("^(.*)%.")
-		own_mdl_tail = the_mdl_name:match("[.](.*)$")
-		as_module = (
-			the_mdl_name == "load_as_module" or
-			the_mdl_name == own_file_name or
-			own_mdl_head and
-			the_mdl_name:match("%.("..own_file_name..")$") == own_file_name and
-			own_file_fold:match("\\("..own_mdl_head..")\\$")==own_mdl_head
-				)
+	then	own_mdl_head =	the_mdl_name:match("^(.*)%.")
+		own_mdl_tail =	the_mdl_name:match("[.](.*)$")
+		as_module =	the_mdl_name == "load_as_module"
+			or	the_mdl_name == own_file_name
+			or	own_mdl_head
+			and	the_mdl_name:match("%.("..own_file_name..")$")	== own_file_name
+			and	own_file_fold:match("\\("..own_mdl_head..")\\$")== own_mdl_head
 	end
 	return
 		as_module,		
