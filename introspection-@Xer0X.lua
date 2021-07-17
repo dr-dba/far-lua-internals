@@ -8,6 +8,25 @@ if true then return end --]]
 	aka live code analysis.
 ]]
 
+-- ### OPTIONS BLOCK ###
+
+-- luacheck: ignore 113/Info
+local Info = Info or package.loaded.regscript or function(...) return ... end
+local nfo = Info({
+	_filename or ...,
+	name		= "introspection-@Xer0X.lua",
+	-- запуск макросов нетрадиционными способами
+	description	= "introspection into LuaFar internals and custom code",
+	id		= "76272281-3158-4A24-9607-1945190F7EA7",
+	version		= "1.0",
+	author		= "x-Team",
+	url_git		= "https://github.com/dr-dba/far-lua-internals",
+})
+if not nfo then return end
+local opts = nfo.options
+
+-- @@@ END OF THE OPTIONS BLOCK @@@
+
 local Xer0X = require("Lib-Common-@Xer0X")
 local fnc_norm_script_path	= Xer0X.fnc_norm_script_path
 local fnc_str_trim		= Xer0X.fnc_str_trim1
@@ -310,10 +329,12 @@ do
 	}
 	if	tbl_upvals.LoadedMacros
 	then    Xer0X.utils	=	tbl_upvals
+		Xer0X.utils_shared =	tbl_upvals.Shared.utils
 		Xer0X.utils_local =	tbl_locals
 	elseif	tbl_upvals.KeyMacro
 	then	Xer0X.key_mcr_inf =	tbl_upvals
 		Xer0X.key_mcr_inf_loc = tbl_locals
+		far.Message("!!!!!????")
 	end
 end
 _G.Xer0X.internals = all_the_stuff
@@ -362,32 +383,39 @@ Xer0X.fnc_macrolist_find = function(mark_id)
 		all_the_stuff[ii] = { mcr_src = mcr_src, mcr_inf = mcr_inf, LastWriteTime = LastWriteTime, tbl_locals = tbl_locals, tbl_upvals = tbl_upvals, dbg_inf = dbg_inf }
 		if	tbl_upvals.macrolist
 		then
-			Xer0X.env_mcr_lst_upv = tbl_upvals
-			Xer0X.env_mcr_lst_upv.LEVEL = ii
-			Xer0X.env_mcr_lst_upv_loc = tbl_locals
-			Xer0X.env_mcr_lst_upv_idx = ii
+			Xer0X.env_mcr_lst_upv		= tbl_upvals
+			Xer0X.env_mcr_lst_upv.LEVEL	= ii
+			Xer0X.env_mcr_lst_upv_loc	= tbl_locals
+			Xer0X.env_mcr_lst_upv_idx	= ii
 			tbl_mcr_lst_upv = tbl_upvals.macrolist
 			tbl_macrolist_marks["UPV"..mark_id] = ii
 			found = true
 		end
 		if	tbl_locals.macrolist
 		then
-			Xer0X.env_mcr_lst_loc = tbl_locals
-			Xer0X.env_mcr_lst_loc_upv = tbl_upvalues
-			Xer0X.env_mcr_lst_loc.LEVEL = ii
-			Xer0X.env_mcr_lst_loc_idx = ii
-			tbl_mcr_lst_loc = tbl_locals.macrolist
+			Xer0X.env_mcr_lst_loc		= tbl_locals
+			Xer0X.env_mcr_lst_loc_upv	= tbl_upvalues
+			Xer0X.env_mcr_lst_loc.LEVEL	= ii
+			Xer0X.env_mcr_lst_loc_idx	= ii
+			tbl_mcr_lst_loc			= tbl_locals.macrolist
 			tbl_macrolist_marks["LOC"..mark_id] = ii
 			found = true
 		end
 		if	tbl_locals.menuitems
 		then
-			Xer0X.env_mcr_items_L = tbl_locals
-			Xer0X.env_mcr_items_L_upv = tbl_upvalues
-			Xer0X.env_mcr_items_L.LEVEL = ii
-			Xer0X.env_mcr_items_L_idx = ii
+			Xer0X.env_mcr_items_L		= tbl_locals
+			Xer0X.env_mcr_items_L_upv	= tbl_upvalues
+			Xer0X.env_mcr_items_L.LEVEL	= ii
+			Xer0X.env_mcr_items_L_idx	= ii
 			tbl_mcr_items_L = tbl_locals.menuitems
 			tbl_mcr_items_marks["LOC"..mark_id] = ii
+		end
+		if type(tbl_locals.ExamineMacro) == "function"
+		then	Xer0X.env_mcr_menu = { 		
+				Lcl = tbl_locals,
+				Upv = tbl_upvalues,
+				Lev = ii
+			}		
 		end
 	end
 	if	found
@@ -504,7 +532,10 @@ Xer0X.fnc_macro_one_load = function(
  mcr_info,
 	mcr_path, no_clean, no_exec
 		)
-	mcr_path = far.ConvertPath(mcr_path, 1)
+	if	mcr_path == nil
+	then	far.Message()
+	else	mcr_path = far.ConvertPath(mcr_path, 1)
+	end
 	if not	no_clean
 	then	Xer0X.fnc_mcr_src_all_clean(mcr_path)
 	end
@@ -558,17 +589,17 @@ Xer0X.fnc_macro_dir_load = function(src_dir)
 end
 
 -- @@@@@ End of the trick with ad-hoc loading macros  @@@@@ ?
- 
-Xer0X.fnc_file_whoami = function(inp_args, from_level, details) 
-	local	dbg_info = debug.getinfo(from_level or 2, details or "S") 
-	local	own_file_path, own_file_fold, own_file_name, own_file_extn 
-	if 	dbg_info.source 
-	then	if	string.match(dbg_info.short_src, "^%[.*%]$") 
-		then	own_file_path = dbg_info.short_src 
-		else	own_file_path = dbg_info.source:match("^@(.+)") 
-			own_file_fold, 
-			own_file_name, 
-			own_file_extn 
+
+Xer0X.fnc_file_whoami = function(inp_args, from_level, details)
+	local	dbg_info = debug.getinfo(from_level or 2, details or "S")
+	local	own_file_path, own_file_fold, own_file_name, own_file_extn
+	if 	dbg_info.source
+	then	if	string.match(dbg_info.short_src, "^%[.*%]$")
+		then	own_file_path = dbg_info.short_src
+		else	own_file_path = dbg_info.source:match("^@(.+)")
+			own_file_fold,
+			own_file_name,
+			own_file_extn
 				= string.match(own_file_path, "(.-)([^/\\]+)([.][^.]+)$")
 		end
 	end
