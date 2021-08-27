@@ -18,7 +18,7 @@ local nfo = Info({
 	-- запуск макросов нетрадиционными способами
 	description	= "introspection into LuaFar internals and custom code",
 	id		= "76272281-3158-4A24-9607-1945190F7EA7",
-	version		= "1.0",
+	version		= "1.1",
 	author		= "x-Team",
 	url_git		= "https://github.com/dr-dba/far-lua-internals",
 })
@@ -334,7 +334,6 @@ do
 	elseif	tbl_upvals.KeyMacro
 	then	Xer0X.key_mcr_inf =	tbl_upvals
 		Xer0X.key_mcr_inf_loc = tbl_locals
-		far.Message("!!!!!????")
 	end
 end
 _G.Xer0X.internals = all_the_stuff
@@ -411,11 +410,11 @@ Xer0X.fnc_macrolist_find = function(mark_id)
 			tbl_mcr_items_marks["LOC"..mark_id] = ii
 		end
 		if type(tbl_locals.ExamineMacro) == "function"
-		then	Xer0X.env_mcr_menu = { 		
+		then	Xer0X.env_mcr_menu = {
 				Lcl = tbl_locals,
 				Upv = tbl_upvalues,
 				Lev = ii
-			}		
+			}
 		end
 	end
 	if	found
@@ -545,12 +544,12 @@ Xer0X.fnc_macro_one_load = function(
 		return
 	end
 	local tbl_env_mcr_ini = {
-		Macro		= function(srctable) Xer0X.utils.AddRegularMacro(	srctable, mcr_path) end,
-		Event		= function(srctable) Xer0X.utils.AddEvent(		srctable, mcr_path) end,
-		MenuItem	= function(srctable) Xer0X.utils.AddMenuItem(		srctable, mcr_path) end,
-	        CommandLine	= function(srctable) Xer0X.utils.AddPrefixes(		srctable, mcr_path) end,
-		PanelModule	= function(srctable) Xer0X.utils.AddPanelModule(	srctable, mcr_path) end,
-		ContentColumns	= function(srctable) Xer0X.utils.AddContentColumns(	srctable, mcr_path) end,
+		Macro		= function(srctable) local m = Xer0X.utils.AddRegularMacro(	srctable, mcr_path); return not not m, m end,
+		Event		= function(srctable) local m = Xer0X.utils.AddEvent(		srctable, mcr_path); return not not m, m end,
+		MenuItem	= function(srctable) local m = Xer0X.utils.AddMenuItem(		srctable, mcr_path); return not not m, m end,
+	        CommandLine	= function(srctable) local m = Xer0X.utils.AddPrefixes(		srctable, mcr_path); return not not m, m end,
+		PanelModule	= function(srctable) local m = Xer0X.utils.AddPanelModule(	srctable, mcr_path); return not not m, m end,
+		ContentColumns	= function(srctable) local m = Xer0X.utils.AddContentColumns(	srctable, mcr_path); return not not m, m end,
 		LoadRegularFile	= Xer0X.utils_local.LoadRegularFile
 	}
 	local fnc_dummy = function() end
